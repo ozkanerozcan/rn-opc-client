@@ -1,0 +1,112 @@
+╔════════════════════════════════════════════════════════════════╗
+║           404 HATASI ÇÖZÜMÜ - HIZLI YÖNTEM                     ║
+╚════════════════════════════════════════════════════════════════╝
+
+SORUN:
+-------
+❌ /_expo/static/css/modal.module-*.css → 404
+❌ /_expo/static/js/web/entry-*.js → 404
+
+NEDEN:
+-------
+Production build güncel değil veya eksik yapılandırılmış.
+
+ÇÖZÜM (3 KOMUT):
+-----------------
+
+1️⃣  cd expo-app
+
+2️⃣  npm install
+
+3️⃣  npm run build:web
+
+
+DEPLOYMENT:
+-----------
+
+Cloudflare Pages için:
+----------------------
+git add .
+git commit -m "PWA fix"
+git push origin main
+
+→ Cloudflare otomatik deploy eder
+→ Dashboard'dan cache temizle (Purge Everything)
+
+
+VEYA Manuel Upload:
+-------------------
+→ Cloudflare Pages Dashboard
+→ "Upload assets"
+→ dist/ klasörünü seç
+→ Upload
+
+
+TEST:
+-----
+✅ https://opcread.ozkanerozcan.com/
+✅ https://opcread.ozkanerozcan.com/manifest.json
+✅ https://opcread.ozkanerozcan.com/service-worker.js
+
+
+OLUŞTURULAN DOSYALAR:
+---------------------
+✅ metro.config.js (Metro bundler config)
+✅ webpack.config.js (Webpack config - public dosyaları kopyalar)
+✅ dist/index.html (PWA meta etiketleri eklendi)
+✅ dist/_redirects (Cloudflare/Netlify routing)
+✅ dist/vercel.json (Vercel config)
+✅ dist/.htaccess (Apache config)
+✅ nginx.conf (Nginx config örneği)
+✅ DEPLOYMENT_GUIDE.md (Detaylı rehber)
+✅ QUICK_FIX.md (Hızlı çözüm rehberi)
+
+
+PWA ÖZELLİKLERİ:
+----------------
+✅ Manifest.json - PWA yapılandırması
+✅ Service Worker - Offline çalışma
+✅ Meta etiketler - PWA desteği
+✅ İkonlar - Tüm cihazlar için
+✅ Offline sayfası - Bağlantı kesildiğinde
+
+
+CLOUDFLARE PAGES AYARLARI:
+---------------------------
+Build command: npm run build:web
+Build output directory: dist
+Root directory: expo-app (eğer subdirectory ise)
+Node.js version: 18.x
+
+
+HIZLI TEST (LOCALde):
+---------------------
+npm run build:web
+npm run serve
+→ http://localhost:3000
+
+
+SORUN DEVAM EDİYORSA:
+---------------------
+1. Browser console'u kontrol et (F12)
+2. Network tab'da failed requests kontrol et
+3. Cloudflare build log'larına bak
+4. dist/_expo/ klasörünün oluştuğunu kontrol et
+
+
+DETAYLI BİLGİ:
+--------------
+→ QUICK_FIX.md (Hızlı düzeltme)
+→ DEPLOYMENT_GUIDE.md (Detaylı deployment)
+→ PWA_KURULUM.md (PWA kullanım)
+→ PWA_README.md (PWA dokümantasyon)
+
+
+═══════════════════════════════════════════════════════════════
+
+ÖNEMLİ: Her değişiklikten sonra:
+1. npm run build:web
+2. git push (veya manuel upload)
+3. Cloudflare cache temizle
+
+═══════════════════════════════════════════════════════════════

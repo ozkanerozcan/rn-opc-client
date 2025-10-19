@@ -23,14 +23,19 @@
       "edgeToEdgeEnabled": true
     },
     "web": {
-      "favicon": "./assets/favicon.png",
+      "favicon": "./public/favicon.ico",
       "bundler": "metro",
       "viewport": {
         "width": "device-width",
         "initialScale": 1.0,
         "maximumScale": 1.0,
         "userScalable": false
-      }
+      },
+      "themeColor": "#ffffff",
+      "backgroundColor": "#ffffff",
+      "manifest": "./public/manifest.json",
+      "serviceWorker": "./public/service-worker.js",
+      "crossorigin": "use-credentials"
     },
     "plugins": [
       "expo-router",

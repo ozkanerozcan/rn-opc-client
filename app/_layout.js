@@ -8,13 +8,37 @@ import Toast, { BaseToast, ErrorToast, InfoToast } from 'react-native-toast-mess
 import { Platform } from 'react-native';
 import 'react-native-gesture-handler';
 
-// Web-specific viewport fix
+// Web-specific viewport fix and PWA setup
 if (Platform.OS === 'web') {
   // Add viewport meta tag for proper scaling
   const meta = document.createElement('meta');
   meta.name = 'viewport';
   meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
   document.getElementsByTagName('head')[0].appendChild(meta);
+  
+  // Add theme color meta tag for PWA
+  const themeColorMeta = document.createElement('meta');
+  themeColorMeta.name = 'theme-color';
+  themeColorMeta.content = '#ffffff';
+  document.getElementsByTagName('head')[0].appendChild(themeColorMeta);
+  
+  // Add apple mobile web app capable
+  const appleMeta = document.createElement('meta');
+  appleMeta.name = 'apple-mobile-web-app-capable';
+  appleMeta.content = 'yes';
+  document.getElementsByTagName('head')[0].appendChild(appleMeta);
+  
+  // Add apple mobile web app status bar style
+  const appleStatusBar = document.createElement('meta');
+  appleStatusBar.name = 'apple-mobile-web-app-status-bar-style';
+  appleStatusBar.content = 'default';
+  document.getElementsByTagName('head')[0].appendChild(appleStatusBar);
+  
+  // Add manifest link
+  const manifestLink = document.createElement('link');
+  manifestLink.rel = 'manifest';
+  manifestLink.href = '/manifest.json';
+  document.getElementsByTagName('head')[0].appendChild(manifestLink);
   
   // Add CSS to fix zoom issues
   const style = document.createElement('style');
@@ -36,6 +60,39 @@ if (Platform.OS === 'web') {
     }
   `;
   document.getElementsByTagName('head')[0].appendChild(style);
+  
+  // Register Service Worker for PWA
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker
+        .register('/service-worker.js')
+        .then((registration) => {
+          console.log('Service Worker registered successfully:', registration.scope);
+          
+          // Check for updates
+          registration.addEventListener('updatefound', () => {
+            const newWorker = registration.installing;
+            newWorker.addEventListener('statechange', () => {
+              if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                console.log('New content available, please refresh.');
+              }
+            });
+          });
+        })
+        .catch((error) => {
+          console.error('Service Worker registration failed:', error);
+        });
+    });
+
+    // Handle updates
+    let refreshing = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!refreshing) {
+        refreshing = true;
+        window.location.reload();
+      }
+    });
+  }
 }
 
 // Custom Toast Configuration
