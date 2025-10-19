@@ -1,0 +1,581 @@
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  SafeAreaView,
+  ScrollView,
+  TouchableOpacity,
+  TextInput,
+  ActivityIndicator,
+  Alert,
+  Share,
+} from 'react-native';
+import { useTheme } from '../contexts/ThemeContext';
+import { useLanguage } from '../contexts/LanguageContext';
+import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
+import { showSuccess, showError } from '../utils/toast';
+import {
+  getRecordingSummary,
+  updateRecordingName,
+  deleteRecording,
+  exportRecordingValues,
+} from '../services/subscriptionService';
+import { useFocusEffect } from '@react-navigation/native';
+
+export default function RecordingsScreen() {
+  const { colors } = useTheme();
+  const { t } = useLanguage();
+  const router = useRouter();
+
+  const [recordings, setRecordings] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [editingName, setEditingName] = useState('');
+
+  console.log('RecordingsScreen render - recordings.length:', recordings.length);
+
+  // Load recordings
+  const loadRecordings = async (isRefresh = false) => {
+    try {
+      if (isRefresh) {
+        setRefreshing(true);
+      } else {
+        setLoading(true);
+      }
+
+      console.log('Loading recordings...');
+      const result = await getRecordingSummary();
+      console.log('Recordings result:', result);
+      
+      if (result.success) {
+        console.log('Recordings data:', result.data);
+        console.log('First recording detail:', result.data[0]);
+        console.log('Recording names:', result.data.map(r => r.recording_name));
+        console.log('Setting recordings state with', result.data.length, 'items');
+        setRecordings(result.data);
+        console.log('State set!');
+      } else {
+        console.error('Failed to load recordings:', result.error);
+        showError('Error', result.error || 'Failed to load recordings');
+      }
+    } catch (error) {
+      console.error('Error loading recordings:', error);
+      showError('Error', error.message);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  // Load on mount and when screen is focused
+  useEffect(() => {
+    loadRecordings();
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadRecordings(true);
+    }, [])
+  );
+
+  // Format duration
+  const formatDuration = (seconds) => {
+    if (!seconds || seconds === 0) return 'No data';
+    
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = Math.floor(seconds % 60);
+    
+    if (hours > 0) {
+      return `${hours}h ${minutes}m`;
+    } else if (minutes > 0) {
+      return `${minutes}m ${secs}s`;
+    } else {
+      return `${secs}s`;
+    }
+  };
+
+  // Format date
+  const formatDate = (dateString) => {
+    const date = new Date(dateString);
+    return date.toLocaleString();
+  };
+
+  // Start editing name
+  const startEditName = (recording) => {
+    setEditingId(recording.id);
+    setEditingName(recording.recording_name);
+  };
+
+  // Save new name
+  const saveRecordingName = async (recordId) => {
+    if (!editingName.trim()) {
+      showError('Error', 'Recording name cannot be empty');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const result = await updateRecordingName(recordId, editingName.trim());
+
+      if (result.success) {
+        showSuccess('Success', 'Recording name updated');
+        setEditingId(null);
+        setEditingName('');
+        loadRecordings(true);
+      } else {
+        showError('Error', result.error || 'Failed to update name');
+      }
+    } catch (error) {
+      showError('Error', error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Delete recording
+  const handleDeleteRecording = (recording) => {
+    Alert.alert(
+      'Delete Recording',
+      `Are you sure you want to delete "${recording.recording_name}"?\n\nThis will delete ${recording.total_values} recorded values.\n\nThis action cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setLoading(true);
+              const result = await deleteRecording(recording.id);
+
+              if (result.success) {
+                showSuccess('Deleted', `Deleted ${result.deletedValues} values`);
+                loadRecordings(true);
+              } else {
+                showError('Error', result.error || 'Failed to delete recording');
+              }
+            } catch (error) {
+              showError('Error', error.message);
+            } finally {
+              setLoading(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  // Export recording
+  const handleExportRecording = async (recording) => {
+    try {
+      setLoading(true);
+      const result = await exportRecordingValues(recording.id);
+
+      if (result.success) {
+        // Convert to JSON string
+        const jsonString = JSON.stringify(result.data, null, 2);
+        
+        // Try to share
+        try {
+          await Share.share({
+            message: jsonString,
+            title: `${recording.recording_name}.json`,
+          });
+        } catch (shareError) {
+          // If share fails, just show success
+          showSuccess('Exported', 'Recording data prepared');
+          console.log('Export data:', jsonString);
+        }
+      } else {
+        showError('Error', result.error || 'Failed to export recording');
+      }
+    } catch (error) {
+      showError('Error', error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // View recording details
+  const viewRecordingDetails = (recording) => {
+    // Navigate to details screen (to be created)
+    router.push({
+      pathname: '/recording-details',
+      params: { recordingId: recording.id, recordingName: recording.recording_name }
+    });
+  };
+
+  return (
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+      {/* Header */}
+      <View style={[styles.header, { borderBottomColor: colors.border }]}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
+        </TouchableOpacity>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>My Recordings</Text>
+        <TouchableOpacity onPress={() => loadRecordings(true)} style={styles.refreshButton}>
+          <Ionicons name="refresh" size={24} color={colors.text} />
+        </TouchableOpacity>
+      </View>
+
+      {/* SIMPLE TEST VIEW */}
+      <View style={{ flex: 1, padding: 20 }}>
+        <Text style={{ fontSize: 24, color: colors.text, marginBottom: 20 }}>
+          DEBUG: {recordings.length} recordings
+        </Text>
+        
+        {recordings.map((rec, index) => (
+          <View key={rec.id} style={{ padding: 10, marginBottom: 10, backgroundColor: colors.card, borderRadius: 8 }}>
+            <Text style={{ color: colors.text, fontSize: 16 }}>
+              {index + 1}. {rec.recording_name || 'No name'}
+            </Text>
+            <Text style={{ color: colors.subtext, fontSize: 12 }}>
+              {rec.total_values || 0} values
+            </Text>
+          </View>
+        ))}
+        
+        {recordings.length === 0 && (
+          <Text style={{ color: colors.text }}>No recordings found</Text>
+        )}
+      </View>
+    </SafeAreaView>
+  );
+        {/* Summary Card */}
+        <View style={[styles.summaryCard, { backgroundColor: colors.card }]}>
+          <Text style={[styles.summaryTitle, { color: colors.text }]}>Total Recordings</Text>
+          <Text style={[styles.summaryValue, { color: colors.primary }]}>
+            {recordings.length}
+          </Text>
+          <Text style={[styles.summarySubtext, { color: colors.subtext }]}>
+            {recordings.reduce((sum, r) => sum + (r.total_values || 0), 0).toLocaleString()} total values
+          </Text>
+          <Text style={[styles.summarySubtext, { color: colors.subtext }]}>
+            DEBUG: Loading={loading.toString()}, Refreshing={refreshing.toString()}
+          </Text>
+        </View>
+
+        {/* DEBUG: Show raw data */}
+        <View style={[styles.summaryCard, { backgroundColor: colors.card }]}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>DEBUG Info</Text>
+          <Text style={[styles.summarySubtext, { color: colors.subtext }]}>
+            Array length: {recordings.length}
+          </Text>
+          <Text style={[styles.summarySubtext, { color: colors.subtext }]}>
+            Array type: {Array.isArray(recordings) ? 'Array' : 'Not Array'}
+          </Text>
+          <Text style={[styles.summarySubtext, { color: colors.subtext }]}>
+            First item: {recordings[0] ? 'EXISTS' : 'NULL'}
+          </Text>
+        </View>
+
+        {/* Recordings List */}
+        {loading && !refreshing ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={colors.primary} />
+          </View>
+        ) : recordings.length === 0 ? (
+          <View style={styles.emptyState}>
+            <Ionicons name="folder-open-outline" size={64} color={colors.subtext} />
+            <Text style={[styles.emptyText, { color: colors.subtext }]}>
+              No recordings yet
+            </Text>
+            <Text style={[styles.emptySubtext, { color: colors.placeholder }]}>
+              Start recording from Subscribe Node screen
+            </Text>
+          </View>
+        ) : (
+          <View style={styles.recordingsList}>
+            {recordings.map((recording) => (
+              <View
+                key={recording.id}
+                style={[styles.recordingCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+              >
+                {/* Recording Name */}
+                {editingId === recording.id ? (
+                  <View style={styles.editNameContainer}>
+                    <TextInput
+                      style={[styles.editNameInput, { backgroundColor: colors.input, color: colors.text, borderColor: colors.border }]}
+                      value={editingName}
+                      onChangeText={setEditingName}
+                      autoFocus
+                      placeholder="Recording name"
+                      placeholderTextColor={colors.placeholder}
+                    />
+                    <View style={styles.editNameButtons}>
+                      <TouchableOpacity
+                        style={[styles.editButton, { backgroundColor: colors.primary }]}
+                        onPress={() => saveRecordingName(recording.id)}
+                      >
+                        <Ionicons name="checkmark" size={20} color="#FFFFFF" />
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.editButton, { backgroundColor: '#6B7280' }]}
+                        onPress={() => {
+                          setEditingId(null);
+                          setEditingName('');
+                        }}
+                      >
+                        <Ionicons name="close" size={20} color="#FFFFFF" />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ) : (
+                  <TouchableOpacity 
+                    style={styles.recordingHeader}
+                    onPress={() => viewRecordingDetails(recording)}
+                  >
+                    <View style={styles.recordingHeaderLeft}>
+                      <Ionicons 
+                        name={recording.is_recording ? "radio-button-on" : "stop-circle-outline"} 
+                        size={24} 
+                        color={recording.is_recording ? '#EF4444' : colors.subtext} 
+                      />
+                      <Text style={[styles.recordingName, { color: colors.text }]}>
+                        {recording.recording_name}
+                      </Text>
+                    </View>
+                    <TouchableOpacity
+                      style={styles.editNameButton}
+                      onPress={() => startEditName(recording)}
+                    >
+                      <Ionicons name="pencil" size={18} color={colors.subtext} />
+                    </TouchableOpacity>
+                  </TouchableOpacity>
+                )}
+
+                {/* Recording Info */}
+                <View style={styles.recordingInfo}>
+                  <View style={styles.infoRow}>
+                    <Ionicons name="analytics-outline" size={16} color={colors.subtext} />
+                    <Text style={[styles.infoText, { color: colors.subtext }]}>
+                      {recording.total_values || 0} values
+                    </Text>
+                  </View>
+                  <View style={styles.infoRow}>
+                    <Ionicons name="time-outline" size={16} color={colors.subtext} />
+                    <Text style={[styles.infoText, { color: colors.subtext }]}>
+                      {formatDuration(recording.duration_seconds)}
+                    </Text>
+                  </View>
+                  <View style={styles.infoRow}>
+                    <Ionicons name="calendar-outline" size={16} color={colors.subtext} />
+                    <Text style={[styles.infoText, { color: colors.subtext }]}>
+                      {formatDate(recording.created_at)}
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Node Info */}
+                <View style={[styles.nodeInfo, { backgroundColor: colors.input }]}>
+                  <Text style={[styles.nodeLabel, { color: colors.placeholder }]}>Node:</Text>
+                  <Text style={[styles.nodeText, { color: colors.text }]}>{recording.original_node_id}</Text>
+                </View>
+
+                {/* Value Range (if numeric) */}
+                {recording.min_value !== null && recording.max_value !== null && (
+                  <View style={styles.valueRange}>
+                    <Text style={[styles.rangeLabel, { color: colors.subtext }]}>
+                      Range: {recording.min_value} - {recording.max_value}
+                    </Text>
+                  </View>
+                )}
+
+                {/* Actions */}
+                <View style={styles.recordingActions}>
+                  <TouchableOpacity
+                    style={[styles.actionButton, { backgroundColor: '#3B82F6' }]}
+                    onPress={() => viewRecordingDetails(recording)}
+                  >
+                    <Ionicons name="eye-outline" size={18} color="#FFFFFF" />
+                    <Text style={styles.actionButtonText}>View</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.actionButton, { backgroundColor: '#10B981' }]}
+                    onPress={() => handleExportRecording(recording)}
+                  >
+                    <Ionicons name="download-outline" size={18} color="#FFFFFF" />
+                    <Text style={styles.actionButtonText}>Export</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.actionButton, { backgroundColor: '#EF4444' }]}
+                    onPress={() => handleDeleteRecording(recording)}
+                  >
+                    <Ionicons name="trash-outline" size={18} color="#FFFFFF" />
+                    <Text style={styles.actionButtonText}>Delete</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+  },
+  backButton: {
+    padding: 8,
+  },
+  refreshButton: {
+    padding: 8,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  content: {
+    flex: 1,
+    padding: 16,
+  },
+  summaryCard: {
+    padding: 20,
+    borderRadius: 12,
+    marginBottom: 16,
+    alignItems: 'center',
+  },
+  summaryTitle: {
+    fontSize: 14,
+    fontWeight: '500',
+    marginBottom: 8,
+  },
+  summaryValue: {
+    fontSize: 36,
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  summarySubtext: {
+    fontSize: 12,
+  },
+  loadingContainer: {
+    paddingVertical: 32,
+    alignItems: 'center',
+  },
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: 48,
+  },
+  emptyText: {
+    fontSize: 18,
+    fontWeight: '500',
+    marginTop: 16,
+  },
+  emptySubtext: {
+    fontSize: 14,
+    marginTop: 8,
+  },
+  recordingsList: {
+    gap: 16,
+  },
+  recordingCard: {
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  editNameContainer: {
+    marginBottom: 12,
+  },
+  editNameInput: {
+    height: 40,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    fontSize: 16,
+    marginBottom: 8,
+  },
+  editNameButtons: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  editButton: {
+    flex: 1,
+    height: 36,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  recordingHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  recordingHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    flex: 1,
+  },
+  recordingName: {
+    fontSize: 16,
+    fontWeight: '600',
+    flex: 1,
+  },
+  editNameButton: {
+    padding: 8,
+  },
+  recordingInfo: {
+    gap: 8,
+    marginBottom: 12,
+  },
+  infoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  infoText: {
+    fontSize: 14,
+  },
+  nodeInfo: {
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 8,
+  },
+  nodeLabel: {
+    fontSize: 12,
+    marginBottom: 4,
+  },
+  nodeText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  valueRange: {
+    marginBottom: 12,
+  },
+  rangeLabel: {
+    fontSize: 14,
+  },
+  recordingActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  actionButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    height: 36,
+    borderRadius: 8,
+  },
+  actionButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+});

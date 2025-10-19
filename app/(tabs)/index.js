@@ -119,6 +119,39 @@ export default function HomeScreen() {
             </View>
             <Ionicons name="chevron-forward" size={20} color={colors.subtext} />
           </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.actionCard, { backgroundColor: colors.card }]}
+            onPress={() => router.push('/quick-record')}
+            disabled={!isConnected}
+          >
+            <View style={[styles.actionIcon, { backgroundColor: '#EF444420' }]}>
+              <Ionicons name="radio-button-on" size={24} color="#EF4444" />
+            </View>
+            <View style={styles.actionContent}>
+              <Text style={[styles.actionTitle, { color: colors.text }]}>Quick Record</Text>
+              <Text style={[styles.actionDescription, { color: colors.subtext }]}>
+                One-click recording: register, subscribe & record
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={colors.subtext} />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.actionCard, { backgroundColor: colors.card }]}
+            onPress={() => router.push('/recordings')}
+          >
+            <View style={[styles.actionIcon, { backgroundColor: '#10B98120' }]}>
+              <Ionicons name="folder" size={24} color="#10B981" />
+            </View>
+            <View style={styles.actionContent}>
+              <Text style={[styles.actionTitle, { color: colors.text }]}>My Recordings</Text>
+              <Text style={[styles.actionDescription, { color: colors.subtext }]}>
+                View, manage and chat with your recorded data
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={colors.subtext} />
+          </TouchableOpacity>
         </View>
       </ScrollView>
     </SafeAreaView>

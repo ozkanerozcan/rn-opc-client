@@ -31,7 +31,7 @@ export default function RegisterNodeScreen() {
   const router = useRouter();
 
   // State
-  const [nodeId, setNodeId] = useState('');
+  const [nodeId, setNodeId] = useState('ns=3;s="DB_Data"."int"');
   const [loading, setLoading] = useState(false);
   const [selectedNode, setSelectedNode] = useState(null);
   const [showNodePicker, setShowNodePicker] = useState(false);
@@ -283,7 +283,7 @@ export default function RegisterNodeScreen() {
               styles.input,
               { backgroundColor: colors.input, color: colors.text, borderColor: colors.border },
             ]}
-            placeholder="ns=2;s=MyVariable"
+            placeholder='ns=3;s="DB_Data"."int"'
             placeholderTextColor={colors.placeholder}
             value={nodeId}
             onChangeText={setNodeId}

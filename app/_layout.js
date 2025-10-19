@@ -3,6 +3,7 @@ import { ThemeProvider } from '../contexts/ThemeContext';
 import { LanguageProvider } from '../contexts/LanguageContext';
 import { PLCProvider } from '../contexts/PLCContext';
 import { AuthProvider } from '../contexts/AuthContext';
+import AuthGuard from '../components/AuthGuard';
 import Toast, { BaseToast, ErrorToast, InfoToast } from 'react-native-toast-message';
 import { Platform } from 'react-native';
 import 'react-native-gesture-handler';
@@ -140,13 +141,15 @@ export default function RootLayout() {
       <LanguageProvider>
         <AuthProvider>
           <PLCProvider>
-            <Stack screenOptions={{ headerShown: false }}>
-              <Stack.Screen name="index" />
-              <Stack.Screen name="login" />
-              <Stack.Screen name="register" />
-              <Stack.Screen name="(tabs)" />
-            </Stack>
-            <Toast config={toastConfig} />
+            <AuthGuard>
+              <Stack screenOptions={{ headerShown: false }}>
+                <Stack.Screen name="index" />
+                <Stack.Screen name="login" />
+                <Stack.Screen name="register" />
+                <Stack.Screen name="(tabs)" />
+              </Stack>
+              <Toast config={toastConfig} />
+            </AuthGuard>
           </PLCProvider>
         </AuthProvider>
       </LanguageProvider>

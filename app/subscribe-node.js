@@ -11,6 +11,7 @@ import {
 import { useTheme } from '../contexts/ThemeContext';
 import { useLanguage } from '../contexts/LanguageContext';
 import { usePLC } from '../contexts/PLCContext';
+import { useAuth } from '../contexts/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import SelectModal from '../components/SelectModal';
@@ -22,11 +23,20 @@ import {
   getSubscriptionValue,
   getActiveSubscriptions,
 } from '../services/plcApi';
+import {
+  createSubscriptionRecord,
+  updateRecordingStatus,
+  deleteSubscriptionRecord,
+  saveSubscriptionValue,
+  getLatestValueForNode,
+  getRecordedValueCount,
+} from '../services/subscriptionService';
 
 export default function SubscribeNodeScreen() {
   const { colors } = useTheme();
   const { t } = useLanguage();
   const { isConnected, registeredNodes } = usePLC();
+  const { user } = useAuth();
   const router = useRouter();
 
   // State
@@ -84,34 +94,79 @@ export default function SubscribeNodeScreen() {
       const result = await getActiveSubscriptions();
       if (result.success && result.subscriptions) {
         // Recreate subscriptions with polling
-        const loadedSubs = result.subscriptions.map(sub => {
+        const loadedSubs = await Promise.all(result.subscriptions.map(async (sub) => {
+          // Supabase'den kayıt durumunu ve son değeri yükle
+          let recordingData = null;
+          let latestDbValue = null;
+          let recordedCount = 0;
+
+          try {
+            const latestResult = await getLatestValueForNode(sub.nodeId);
+            if (latestResult.success && latestResult.data) {
+              latestDbValue = latestResult.data;
+            }
+
+            const countResult = await getRecordedValueCount(sub.subscriptionId);
+            if (countResult.success) {
+              recordedCount = countResult.count;
+            }
+          } catch (err) {
+            console.error('Error loading recording data:', err);
+          }
+
           // Start polling for this subscription
-          const pollingInterval = setInterval(() => {
-            getSubscriptionValue(sub.subscriptionId)
-              .then(valueResult => {
-                if (valueResult.success && valueResult.value) {
-                  setSubscriptions(prev => prev.map(s => 
-                    s.subscriptionId === sub.subscriptionId
-                      ? { ...s, latestValue: valueResult.value }
-                      : s
-                  ));
-                }
-              })
-              .catch(err => {
-                console.error('Error getting subscription value:', err);
-              });
-          }, 1000); // Default interval, we don't have interval info from server
+          const pollingInterval = setInterval(async () => {
+            try {
+              const valueResult = await getSubscriptionValue(sub.subscriptionId);
+              if (valueResult.success && valueResult.value) {
+                setSubscriptions(prev => prev.map(s => {
+                  if (s.subscriptionId === sub.subscriptionId) {
+                    const updated = { ...s, latestValue: valueResult.value };
+                    
+                    // Eğer recording aktifse, değeri kaydet
+                    if (s.isRecording && s.subscriptionRecordId) {
+                      saveSubscriptionValue(
+                        s.subscriptionRecordId,
+                        s.subscriptionId,
+                        s.nodeId,
+                        s.originalNodeId,
+                        valueResult.value
+                      ).then(saveResult => {
+                        if (saveResult.success) {
+                          // Kayıt sayısını güncelle
+                          setSubscriptions(prev2 => prev2.map(s2 =>
+                            s2.subscriptionId === sub.subscriptionId
+                              ? { ...s2, recordedCount: (s2.recordedCount || 0) + 1 }
+                              : s2
+                          ));
+                        }
+                      }).catch(console.error);
+                    }
+                    
+                    return updated;
+                  }
+                  return s;
+                }));
+              }
+            } catch (err) {
+              console.error('Error getting subscription value:', err);
+            }
+          }, 1000);
           
           return {
             subscriptionId: sub.subscriptionId,
             nodeId: sub.nodeId,
             originalNodeId: sub.originalNodeId,
-            interval: 1000, // Default interval
+            interval: 1000,
             pollingInterval: pollingInterval,
-            startedAt: new Date().toISOString(), // Current time as we don't have original start time
-            latestValue: sub.latestValue || null
+            startedAt: new Date().toISOString(),
+            latestValue: sub.latestValue || null,
+            isRecording: false,
+            subscriptionRecordId: null,
+            latestDbValue: latestDbValue,
+            recordedCount: recordedCount,
           };
-        });
+        }));
         
         setSubscriptions(loadedSubs);
       }
@@ -160,6 +215,18 @@ export default function SubscribeNodeScreen() {
       if (result.success) {
         showSuccess('Subscribed', `Monitoring started (${interval}ms interval)`);
         
+        // Yükleme durumlarını başlat
+        let latestDbValue = null;
+        
+        try {
+          const latestResult = await getLatestValueForNode(selectedNode.registeredId);
+          if (latestResult.success && latestResult.data) {
+            latestDbValue = latestResult.data;
+          }
+        } catch (err) {
+          console.error('Error loading latest value:', err);
+        }
+
         // Create subscription object first
         const newSubscription = {
           subscriptionId: result.subscriptionId,
@@ -168,24 +235,49 @@ export default function SubscribeNodeScreen() {
           interval: interval,
           pollingInterval: null,
           startedAt: new Date().toISOString(),
-          latestValue: null
+          latestValue: null,
+          isRecording: false,
+          subscriptionRecordId: null,
+          latestDbValue: latestDbValue,
+          recordedCount: 0,
         };
         
         // Start polling for updates
-        const pollingInterval = setInterval(() => {
-          getSubscriptionValue(result.subscriptionId)
-            .then(valueResult => {
-              if (valueResult.success && valueResult.value) {
-                setSubscriptions(prev => prev.map(sub => 
-                  sub.subscriptionId === result.subscriptionId
-                    ? { ...sub, latestValue: valueResult.value }
-                    : sub
-                ));
-              }
-            })
-            .catch(err => {
-              console.error('Error getting subscription value:', err);
-            });
+        const pollingInterval = setInterval(async () => {
+          try {
+            const valueResult = await getSubscriptionValue(result.subscriptionId);
+            if (valueResult.success && valueResult.value) {
+              setSubscriptions(prev => prev.map(sub => {
+                if (sub.subscriptionId === result.subscriptionId) {
+                  const updated = { ...sub, latestValue: valueResult.value };
+                  
+                  // Eğer recording aktifse, değeri kaydet
+                  if (sub.isRecording && sub.subscriptionRecordId) {
+                    saveSubscriptionValue(
+                      sub.subscriptionRecordId,
+                      sub.subscriptionId,
+                      sub.nodeId,
+                      sub.originalNodeId,
+                      valueResult.value
+                    ).then(saveResult => {
+                      if (saveResult.success) {
+                        setSubscriptions(prev2 => prev2.map(s2 =>
+                          s2.subscriptionId === result.subscriptionId
+                            ? { ...s2, recordedCount: (s2.recordedCount || 0) + 1 }
+                            : s2
+                        ));
+                      }
+                    }).catch(console.error);
+                  }
+                  
+                  return updated;
+                }
+                return sub;
+              }));
+            }
+          } catch (err) {
+            console.error('Error getting subscription value:', err);
+          }
         }, interval);
         
         newSubscription.pollingInterval = pollingInterval;
@@ -202,7 +294,76 @@ export default function SubscribeNodeScreen() {
     }
   };
 
-  // Unsubscribe from a specific subscription
+  // Toggle recording for a subscription
+  const toggleRecording = async (subscription) => {
+    if (!user) {
+      showError('Error', 'Please login to use recording feature');
+      return;
+    }
+
+    try {
+      setLoading(true);
+
+      if (!subscription.isRecording) {
+        // Start recording - Her zaman yeni kayıt oluştur
+        const createResult = await createSubscriptionRecord(
+          subscription.subscriptionId,
+          subscription.nodeId,
+          subscription.originalNodeId
+        );
+        
+        if (!createResult.success) {
+          throw new Error(createResult.error || 'Failed to create recording');
+        }
+        
+        const subscriptionRecordId = createResult.data.id;
+
+        // Recording durumunu aktif et
+        const updateResult = await updateRecordingStatus(subscriptionRecordId, true);
+        if (!updateResult.success) {
+          throw new Error(updateResult.error || 'Failed to start recording');
+        }
+
+        // State'i güncelle
+        setSubscriptions(prev => prev.map(s =>
+          s.subscriptionId === subscription.subscriptionId
+            ? {
+                ...s,
+                isRecording: true,
+                subscriptionRecordId: subscriptionRecordId,
+                recordedCount: 0,
+              }
+            : s
+        ));
+
+        showSuccess('Recording Started', 'All new values will be saved to database');
+      } else {
+        // Stop recording
+        if (!subscription.subscriptionRecordId) {
+          throw new Error('No recording ID found');
+        }
+        
+        const updateResult = await updateRecordingStatus(subscription.subscriptionRecordId, false);
+        if (!updateResult.success) {
+          throw new Error(updateResult.error || 'Failed to stop recording');
+        }
+
+        // State'i güncelle
+        setSubscriptions(prev => prev.map(s =>
+          s.subscriptionId === subscription.subscriptionId
+            ? { ...s, isRecording: false }
+            : s
+        ));
+
+        showSuccess('Recording Stopped', 'Values are no longer being saved');
+      }
+    } catch (error) {
+      showError('Recording Error', error.message || 'Failed to toggle recording');
+      console.error('Toggle recording error:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
   const handleUnsubscribe = (subscription) => {
     if (!subscription) return;
     setSubscriptionToRemove(subscription);
@@ -217,6 +378,11 @@ export default function SubscribeNodeScreen() {
       
       if (subscriptionToRemove.pollingInterval) {
         clearInterval(subscriptionToRemove.pollingInterval);
+      }
+
+      // Supabase kaydını sil
+      if (subscriptionToRemove.subscriptionRecordId) {
+        await deleteSubscriptionRecord(subscriptionToRemove.subscriptionId);
       }
 
       const result = await unsubscribeFromPLCVariable(subscriptionToRemove.subscriptionId);
@@ -409,20 +575,67 @@ export default function SubscribeNodeScreen() {
 
                   {sub.latestValue && (
                     <View style={[styles.subscriptionValue, { backgroundColor: colors.input }]}>
-                      <Text style={[styles.valueLabel, { color: colors.subtext }]}>
-                        Latest Value:
-                      </Text>
-                      <Text style={[styles.subscriptionValueText, { color: colors.text }]}>
-                        {formatValue(sub.latestValue.value, sub.latestValue.dataType)}
-                      </Text>
-                      <Text style={[styles.valueLabel, { color: colors.subtext }]}>
-                        Type: {sub.latestValue.dataType}
-                      </Text>
-                      <Text style={[styles.valueLabel, { color: colors.subtext }]}>
-                        Updated: {new Date(sub.latestValue.timestamp).toLocaleTimeString()}
-                      </Text>
+                      <View style={styles.valueRow}>
+                        <View style={{flex: 1}}>
+                          <Text style={[styles.valueLabel, { color: colors.subtext }]}>
+                            Latest Value (Live):
+                          </Text>
+                          <Text style={[styles.subscriptionValueText, { color: colors.text }]}>
+                            {formatValue(sub.latestValue.value, sub.latestValue.dataType)}
+                          </Text>
+                          <Text style={[styles.valueLabel, { color: colors.subtext }]}>
+                            Type: {sub.latestValue.dataType} | Quality: {sub.latestValue.quality || 'Good'}
+                          </Text>
+                          <Text style={[styles.valueLabel, { color: colors.subtext }]}>
+                            Updated: {new Date(sub.latestValue.timestamp).toLocaleTimeString()}
+                          </Text>
+                        </View>
+                      </View>
                     </View>
                   )}
+
+                  {/* Recording Section */}
+                  <View style={[styles.recordingSection, { borderTopColor: colors.border }]}>
+                    <View style={styles.recordingInfo}>
+                      <View style={styles.recordingHeader}>
+                        <Ionicons 
+                          name={sub.isRecording ? "radio-button-on" : "radio-button-off"} 
+                          size={20} 
+                          color={sub.isRecording ? '#EF4444' : colors.subtext} 
+                        />
+                        <Text style={[styles.recordingText, { color: colors.text }]}>
+                          {sub.isRecording ? 'Recording' : 'Not Recording'}
+                        </Text>
+                      </View>
+                      {sub.isRecording && (
+                        <Text style={[styles.recordingDetail, { color: colors.subtext }]}>
+                          {sub.recordedCount || 0} values saved
+                        </Text>
+                      )}
+                      {sub.latestDbValue && (
+                        <Text style={[styles.recordingDetail, { color: colors.subtext }]}>
+                          Last DB: {formatValue(sub.latestDbValue.value, sub.latestDbValue.data_type)} at {new Date(sub.latestDbValue.recorded_at).toLocaleTimeString()}
+                        </Text>
+                      )}
+                    </View>
+                    <TouchableOpacity
+                      style={[
+                        styles.recordButton,
+                        { backgroundColor: sub.isRecording ? '#EF4444' : colors.primary }
+                      ]}
+                      onPress={() => toggleRecording(sub)}
+                      disabled={loading}
+                    >
+                      <Ionicons 
+                        name={sub.isRecording ? "stop" : "recording"} 
+                        size={18} 
+                        color="#FFFFFF" 
+                      />
+                      <Text style={styles.recordButtonText}>
+                        {sub.isRecording ? 'Stop' : 'Record'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
               ))}
             </View>
@@ -649,5 +862,48 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
     marginVertical: 4,
+  },
+  valueRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  recordingSection: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+  },
+  recordingInfo: {
+    flex: 1,
+  },
+  recordingHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 4,
+  },
+  recordingText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  recordingDetail: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  recordButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 6,
+  },
+  recordButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });
